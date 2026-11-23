@@ -60,11 +60,109 @@
   //   7. On page load, read the saved bookmarks from storage and render
   //      them so the list persists across reloads.
   //
-  // Because this code lives in a client <script>, browser storage APIs are
-  // safe to use here without breaking the static build.
+  // Because this code lives in a client <script>
+  // CLIENT-SIDE BOUNDARY — runs in the browser only.
+  // Bookmarks are persisted in the browser with localStorage, so nothing here
+  // touches storage during Astro's static build.
+  import { normalizeUrl, makeSlug, parseStored } from '../lib/bookmarks.js';
+
+  const STORAGE_KEY = 'mona-bookmarks';
+
   const form = document.getElementById('add-bookmark');
-  form?.addEventListener('submit', (event) => {
+  const input = document.getElementById('url');
+  const list = document.getElementById('bookmark-list');
+  const emptyState = document.getElementById('empty-state');
+  const listHeader = document.getElementById('list-header');
+  const clearAll = document.getElementById('clear-all');
+
+  let bookmarks = [];
+
+  function load() {
+    try {
+      return parseStored(localStorage.getItem(STORAGE_KEY));
+    } catch (err) {
+      return [];
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(bookmarks));
+    } catch (err) {
+      // Storage may be unavailable (private mode, quota) — keep working in memory.
+    }
+  }
+
+  function render() {
+    list.textContent = '';
+    for (const bm of bookmarks) {
+      const li = document.createElement('li');
+      li.className = 'bookmark';
+
+      const link = document.createElement('a');
+      link.className = 'url';
+      link.href = bm.url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = bm.url;
+
+      const badge = document.createElement('span');
+      badge.className = 'slug';
+      badge.textContent = bm.slug;
+
+      const copy = document.createElement('button');
+      copy.type = 'button';
+      copy.className = 'copy';
+      copy.textContent = 'Copy';
+      copy.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(bm.slug);
+          copy.textContent = 'Copied!';
+        } catch (err) {
+          copy.textContent = 'Copy failed';
+        }
+        setTimeout(() => { copy.textContent = 'Copy'; }, 1500);
+      });
+
+      li.append(link, badge, copy);
+      list.append(li);
+    }
+    const has = bookmarks.length > 0;
+    emptyState.hidden = has;
+    listHeader.hidden = !has;
+  }
+
+  form.addEventListener('submit', (event) => {
     event.preventDefault(); // keep this — stops the page from reloading
-    // Implement in Step 3.
+    input.setCustomValidity('');
+    const url = normalizeUrl(input.value);
+    if (!url) {
+      input.setCustomValidity('Please enter a valid http(s) URL.');
+      input.reportValidity();
+      return;
+    }
+    const slug = makeSlug(url, bookmarks.map((b) => b.slug));
+    bookmarks.unshift({ url, slug });
+    save();
+    render();
+    form.reset();
+    input.focus();
   });
+
+  input.addEventListener('input', () => input.setCustomValidity(''));
+
+  clearAll.addEventListener('click', () => {
+    if (!confirm('Remove all saved bookmarks?')) return;
+    bookmarks = [];
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (err) {
+      // ignore
+    }
+    render();
+  });
+
+  // On page load, restore saved bookmarks so the list persists across reloads.
+  bookmarks = load();
+  render();
 </script>
